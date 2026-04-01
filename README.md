@@ -6,11 +6,12 @@ Native macOS menu bar app that shows tech news headlines from a remote vibereade
 
 ## Features
 
-- **Menu bar icon** — "V" in your menu bar, no Dock icon
-- **Live headlines** — top 15 articles with score, source, and category tags
-- **Click to read** — opens articles in your default browser
-- **Auto-refresh** — fetches new articles every 60 seconds
-- **Refresh Feed** — manual refresh triggers a server-side fetch
+- **Menu bar popover** — "V" in your menu bar, click for a SwiftUI popover panel (no Dock icon)
+- **Live headlines** — top 15 articles with colored score badges, category pills, and source labels
+- **Search/filter** — live search bar to filter articles by text
+- **Click to read** — opens articles in your default browser, popover stays open
+- **Auto-refresh** — fetches new articles every 60 seconds with smooth animations
+- **Refresh Feed** — manual refresh with spinning indicator
 - **Configurable API** — point to any vibereader backend via environment variable
 
 ## Requirements
@@ -22,11 +23,14 @@ Native macOS menu bar app that shows tech news headlines from a remote vibereade
 ## Build & Run
 
 ```bash
-git clone <this-repo>
+git clone https://github.com/TT-Wang/vibereader-menubar.git
 cd vibereader-menubar
+rm -rf .build
 swift build
-.build/debug/VibereaderMenuBar
+.build/debug/VibereaderMenuBar 2>&1
 ```
+
+> **Note:** Always use `rm -rf .build` before building after a `git pull` to ensure a clean build.
 
 ## Configuration
 
@@ -75,6 +79,6 @@ Then add `/usr/local/bin/VibereaderMenuBar` to System Settings > General > Login
 ```
 Package.swift                              — SPM manifest
 Sources/VibereaderMenuBar/
-  main.swift                               — AppKit menu bar app (~190 lines)
+  main.swift                               — AppKit + SwiftUI popover app (~290 lines)
   Info.plist                               — LSUIElement=true (no Dock icon)
 ```
