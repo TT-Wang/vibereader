@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import SwiftUI
 
 // MARK: - Config
 
@@ -30,103 +31,24 @@ struct FeedResponse: Decodable {
     }
 }
 
-// MARK: - AppDelegate
+// MARK: - AppState
 
-class AppDelegate: NSObject, NSApplicationDelegate {
-    var statusItem: NSStatusItem!
-    var menu: NSMenu!
-    var refreshTimer: Timer?
-    var lastFetched: Date?
-    var articles: [Article] = []
+class AppState: ObservableObject {
+    @Published var articles: [Article] = []
+    @Published var lastFetched: Date? = nil
+    @Published var isRefreshing: Bool = false
+    @Published var searchText: String = ""
 
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        fputs("VibereaderMenuBar: launching...\n", stderr)
-
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        if let button = statusItem.button {
-            button.title = "V"
-            fputs("VibereaderMenuBar: status item created\n", stderr)
+    var filteredArticles: [Article] {
+        let sorted = articles.sorted { $0.score > $1.score }
+        let top = Array(sorted.prefix(15))
+        if searchText.isEmpty { return top }
+        return top.filter { a in
+            a.title.localizedCaseInsensitiveContains(searchText) ||
+            a.source.localizedCaseInsensitiveContains(searchText) ||
+            a.categories.contains { $0.localizedCaseInsensitiveContains(searchText) }
         }
-
-        menu = NSMenu()
-        statusItem.menu = menu
-        setupMenu()
-
-        fetchArticles()
-
-        let timer = Timer(timeInterval: 60, target: self, selector: #selector(timerFired(_:)), userInfo: nil, repeats: true)
-        RunLoop.main.add(timer, forMode: .common)
-        refreshTimer = timer
-        fputs("VibereaderMenuBar: ready\n", stderr)
     }
-
-    @objc func timerFired(_ timer: Timer) {
-        fetchArticles()
-    }
-
-    // MARK: - Menu Setup
-
-    func setupMenu() {
-        menu.removeAllItems()
-
-        // Fetched time header
-        let fetchedLabel: String
-        if let lastFetched = lastFetched {
-            let minutes = Int(Date().timeIntervalSince(lastFetched) / 60)
-            fetchedLabel = "fetched \(minutes) min ago"
-        } else {
-            fetchedLabel = "fetched: never"
-        }
-        let headerItem = NSMenuItem(title: fetchedLabel, action: nil, keyEquivalent: "")
-        headerItem.isEnabled = false
-        menu.addItem(headerItem)
-
-        menu.addItem(NSMenuItem.separator())
-
-        // Articles (up to 15)
-        let displayArticles = Array(articles.prefix(15))
-        for article in displayArticles {
-            var truncatedTitle = article.title
-            if truncatedTitle.count > 60 {
-                let index = truncatedTitle.index(truncatedTitle.startIndex, offsetBy: 60)
-                truncatedTitle = String(truncatedTitle[..<index]) + "..."
-            }
-            let scoreStr = String(format: "%.1f", article.score)
-            let itemTitle = "\(truncatedTitle)  \u{27E8}\(scoreStr)\u{27E9} \(article.source)"
-
-            let menuItem = NSMenuItem(
-                title: itemTitle,
-                action: #selector(openArticle(_:)),
-                keyEquivalent: ""
-            )
-            menuItem.representedObject = article.url as String
-            menuItem.target = self
-            menu.addItem(menuItem)
-        }
-
-        menu.addItem(NSMenuItem.separator())
-
-        // Refresh Feed
-        let refreshItem = NSMenuItem(
-            title: "Refresh Feed",
-            action: #selector(refreshFeed(_:)),
-            keyEquivalent: ""
-        )
-        refreshItem.target = self
-        menu.addItem(refreshItem)
-
-        menu.addItem(NSMenuItem.separator())
-
-        // Quit
-        let quitItem = NSMenuItem(
-            title: "Quit Vibereader",
-            action: #selector(NSApplication.terminate(_:)),
-            keyEquivalent: ""
-        )
-        menu.addItem(quitItem)
-    }
-
-    // MARK: - Networking
 
     func fetchArticles() {
         guard let url = URL(string: "\(Config.apiURL)/api/articles") else {
@@ -134,7 +56,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
+        URLSession.shared.dataTask(with: url) { [weak self] data, _, error in
             guard let self = self else { return }
 
             if let error = error {
@@ -151,9 +73,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 let feedResponse = try JSONDecoder().decode(FeedResponse.self, from: data)
                 let serverDate = ISO8601DateFormatter().date(from: feedResponse.fetchedAt) ?? Date()
                 DispatchQueue.main.async {
-                    self.articles = feedResponse.articles
+                    withAnimation {
+                        self.articles = feedResponse.articles
+                    }
                     self.lastFetched = serverDate
-                    self.setupMenu()
                 }
             } catch {
                 fputs("fetchArticles decode error: \(error)\n", stderr)
@@ -161,36 +84,227 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }.resume()
     }
 
-    @objc func refreshFeed(_ sender: Any?) {
-        fputs("refreshFeed: triggered\n", stderr)
+    func refreshFeed() {
         guard let url = URL(string: "\(Config.apiURL)/refresh") else {
             fputs("refreshFeed: invalid URL\n", stderr)
             return
+        }
+
+        DispatchQueue.main.async {
+            self.isRefreshing = true
         }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+        URLSession.shared.dataTask(with: request) { [weak self] _, response, error in
             if let error = error {
                 fputs("refreshFeed error: \(error.localizedDescription)\n", stderr)
-                return
             }
             if let http = response as? HTTPURLResponse {
                 fputs("refreshFeed: \(http.statusCode)\n", stderr)
             }
             self?.fetchArticles()
+            DispatchQueue.main.async {
+                self?.isRefreshing = false
+            }
         }.resume()
     }
+}
 
-    @objc func openArticle(_ sender: NSMenuItem) {
-        guard let urlString = sender.representedObject as? String,
-              let url = URL(string: urlString) else {
-            fputs("openArticle: invalid URL\n", stderr)
-            return
+// MARK: - PopoverContentView
+
+struct PopoverContentView: View {
+    @ObservedObject var state: AppState
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text("Vibereader")
+                    .font(.headline)
+                    .fontWeight(.bold)
+                Spacer()
+                Text(timeAgoText)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Button {
+                    state.refreshFeed()
+                } label: {
+                    if state.isRefreshing {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 12))
+                    }
+                }
+                .buttonStyle(.borderless)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+
+            Divider()
+
+            // Search bar
+            TextField("Search articles...", text: $state.searchText)
+                .textFieldStyle(.roundedBorder)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+
+            Divider()
+
+            // Article list
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(state.filteredArticles, id: \.id) { article in
+                        ArticleRowView(article: article)
+                        Divider()
+                    }
+                }
+            }
+
+            Divider()
+
+            // Footer
+            Button("Quit Vibereader") {
+                NSApplication.shared.terminate(nil)
+            }
+            .buttonStyle(.borderless)
+            .font(.caption)
+            .foregroundColor(.secondary)
+            .padding(.vertical, 8)
         }
-        NSWorkspace.shared.open(url)
+        .frame(width: 380, maxHeight: 500)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    var timeAgoText: String {
+        guard let date = state.lastFetched else { return "never" }
+        let minutes = Int(Date().timeIntervalSince(date) / 60)
+        if minutes < 1 { return "just now" }
+        if minutes < 60 { return "\(minutes)m ago" }
+        return "\(minutes / 60)h ago"
+    }
+}
+
+// MARK: - ArticleRowView
+
+struct ArticleRowView: View {
+    let article: Article
+    @State private var isHovered = false
+
+    var body: some View {
+        Button {
+            if let url = URL(string: article.url) {
+                NSWorkspace.shared.open(url)
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                // Title
+                Text(article.title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(2)
+                    .foregroundColor(.primary)
+
+                // Score badge + categories + source
+                HStack(spacing: 6) {
+                    // Score badge — colored
+                    Text(String(format: "%.1f", article.score))
+                        .font(.system(size: 10, weight: .bold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(scoreColor.opacity(0.2))
+                        .foregroundColor(scoreColor)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+
+                    // Category pills
+                    ForEach(article.categories.prefix(3), id: \.self) { cat in
+                        Text(cat)
+                            .font(.system(size: 9))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(Color.purple.opacity(0.15))
+                            .foregroundColor(.purple)
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                    }
+
+                    Spacer()
+
+                    // Source
+                    Text(article.source)
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isHovered ? Color.primary.opacity(0.06) : Color.clear)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isHovered = hovering
+            }
+        }
+    }
+
+    var scoreColor: Color {
+        if article.score > 2.0 { return .green }
+        if article.score > 1.0 { return .yellow }
+        return .gray
+    }
+}
+
+// MARK: - AppDelegate
+
+class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
+    var statusItem: NSStatusItem!
+    var popover: NSPopover!
+    var appState = AppState()
+    var refreshTimer: Timer?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        fputs("VibereaderMenuBar: launching...\n", stderr)
+
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        if let button = statusItem.button {
+            button.title = "V"
+            button.action = #selector(togglePopover(_:))
+            button.target = self
+            fputs("VibereaderMenuBar: status item created\n", stderr)
+        }
+
+        popover = NSPopover()
+        popover.contentSize = NSSize(width: 380, height: 500)
+        popover.behavior = .transient
+        popover.delegate = self
+        popover.contentViewController = NSHostingController(rootView: PopoverContentView(state: appState))
+
+        appState.fetchArticles()
+
+        let timer = Timer(timeInterval: 60, target: self, selector: #selector(timerFired(_:)), userInfo: nil, repeats: true)
+        RunLoop.main.add(timer, forMode: .common)
+        refreshTimer = timer
+        fputs("VibereaderMenuBar: ready\n", stderr)
+    }
+
+    @objc func togglePopover(_ sender: Any?) {
+        guard let button = statusItem.button else { return }
+        if popover.isShown {
+            popover.performClose(sender)
+        } else {
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            // Ensure popover window becomes key for keyboard input (search field)
+            popover.contentViewController?.view.window?.makeKey()
+        }
+    }
+
+    @objc func timerFired(_ timer: Timer) {
+        appState.fetchArticles()
     }
 }
 
