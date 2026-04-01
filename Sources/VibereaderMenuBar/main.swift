@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import SwiftUI
+import UserNotifications
 
 // MARK: - Config
 
@@ -54,6 +55,9 @@ class AppState: ObservableObject {
     @Published var searchText: String = ""
     @Published var claudeActive: Bool = false
     @Published var claudeIdleSeconds: Int = -1
+    var wasClaudeActive: Bool = false
+    var lastNotificationTime: Date = .distantPast
+    var notifiedArticleIds: Set<String> = []
 
     var filteredArticles: [Article] {
         let sorted = articles.sorted { $0.score > $1.score }
@@ -106,10 +110,53 @@ class AppState: ObservableObject {
             guard let self = self, let data = data,
                   let status = try? JSONDecoder().decode(ClaudeStatus.self, from: data) else { return }
             DispatchQueue.main.async {
+                let justBecameActive = status.claudeActive && !self.wasClaudeActive
                 self.claudeActive = status.claudeActive
                 self.claudeIdleSeconds = status.idleSeconds
+                self.wasClaudeActive = status.claudeActive
+
+                // Push notification when Claude starts working, max once per 5 min
+                if justBecameActive || (status.claudeActive && Date().timeIntervalSince(self.lastNotificationTime) > 300) {
+                    self.pushArticleNotification()
+                }
             }
         }.resume()
+    }
+
+    func pushArticleNotification() {
+        let unnotified = filteredArticles.filter { !notifiedArticleIds.contains($0.id) }
+        let picks = Array(unnotified.prefix(3))
+        guard !picks.isEmpty else { return }
+
+        lastNotificationTime = Date()
+        for article in picks {
+            notifiedArticleIds.insert(article.id)
+        }
+
+        let titles = picks.enumerated().map { (i, a) in
+            let t = a.title.count > 55 ? String(a.title.prefix(52)) + "..." : a.title
+            return "\(i + 1). \(t)"
+        }.joined(separator: "\n")
+
+        let content = UNMutableNotificationContent()
+        content.title = "📰 While Claude works..."
+        content.body = titles
+        content.sound = .default
+        // Store first article URL for click-to-open
+        if let firstURL = picks.first?.url {
+            content.userInfo = ["url": firstURL]
+        }
+
+        let request = UNNotificationRequest(
+            identifier: "vibereader-\(Int(Date().timeIntervalSince1970))",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error = error {
+                fputs("Notification error: \(error.localizedDescription)\n", stderr)
+            }
+        }
     }
 
     func refreshFeed() {
@@ -336,7 +383,7 @@ struct ArticleRowView: View {
 
 // MARK: - AppDelegate
 
-class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNotificationCenterDelegate {
     var statusItem: NSStatusItem!
     var popover: NSPopover!
     var appState = AppState()
@@ -359,6 +406,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.behavior = .transient
         popover.delegate = self
         popover.contentViewController = NSHostingController(rootView: PopoverContentView(state: appState))
+
+        // Request notification permission
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        center.requestAuthorization(options: [.alert, .sound]) { granted, error in
+            if granted {
+                fputs("VibereaderMenuBar: notifications enabled\n", stderr)
+            }
+        }
 
         appState.fetchArticles()
         appState.fetchStatus()
@@ -393,6 +449,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     @objc func statusTimerFired(_ timer: Timer) {
         appState.fetchStatus()
         updateIcon()
+    }
+
+    // Show notification even when app is in foreground
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .sound])
+    }
+
+    // Open URL when notification is clicked
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
+        if let urlString = response.notification.request.content.userInfo["url"] as? String,
+           let url = URL(string: urlString) {
+            NSWorkspace.shared.open(url)
+        }
+        completionHandler()
     }
 
     func updateIcon() {
