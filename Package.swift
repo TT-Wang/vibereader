@@ -11,7 +11,7 @@ let package = Package(
         .executableTarget(
             name: "VibereaderMenuBar",
             path: "Sources/VibereaderMenuBar",
-            resources: [.process("Info.plist")]
+            exclude: ["Info.plist"]
         )
     ]
 )
