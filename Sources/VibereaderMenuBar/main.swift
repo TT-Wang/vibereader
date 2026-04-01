@@ -107,8 +107,11 @@ class AppState: ObservableObject {
             if let http = response as? HTTPURLResponse {
                 fputs("refreshFeed: \(http.statusCode)\n", stderr)
             }
-            // Wait for server-side fetch to complete before re-fetching articles
-            DispatchQueue.global().asyncAfter(deadline: .now() + 3.0) {
+            // Server fetch takes ~6s. Poll twice: at 4s and 8s to catch the update.
+            DispatchQueue.global().asyncAfter(deadline: .now() + 4.0) {
+                self?.fetchArticles()
+            }
+            DispatchQueue.global().asyncAfter(deadline: .now() + 8.0) {
                 self?.fetchArticles()
                 DispatchQueue.main.async { self?.isRefreshing = false }
             }
