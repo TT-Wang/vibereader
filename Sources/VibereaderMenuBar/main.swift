@@ -40,19 +40,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var articles: [Article] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        fputs("VibereaderMenuBar: launching...\n", stderr)
+
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
             button.title = "V"
+            fputs("VibereaderMenuBar: status item created\n", stderr)
         }
 
         menu = NSMenu()
         statusItem.menu = menu
+        setupMenu()
 
         fetchArticles()
 
         let timer = Timer(timeInterval: 60, target: self, selector: #selector(timerFired(_:)), userInfo: nil, repeats: true)
         RunLoop.main.add(timer, forMode: .common)
         refreshTimer = timer
+        fputs("VibereaderMenuBar: ready\n", stderr)
     }
 
     @objc func timerFired(_ timer: Timer) {
@@ -187,7 +192,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 // MARK: - Entry Point
 
 let app = NSApplication.shared
+app.setActivationPolicy(.accessory)
 let delegate = AppDelegate()
 app.delegate = delegate
-app.setActivationPolicy(.accessory)
+app.activate(ignoringOtherApps: true)
 app.run()
