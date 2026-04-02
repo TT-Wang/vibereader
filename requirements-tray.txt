@@ -1,0 +1,6 @@
+pystray>=0.19
+Pillow>=10.0
+PyGObject>=3.42
+vibereader>=0.1.0
+feedparser
+aiohttp
