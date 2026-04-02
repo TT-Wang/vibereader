@@ -45,6 +45,7 @@ class State:
         self.quit = False
         self.force_refresh = False
         self.fetching = False
+        self.setup_requested = False
 
 
 def load_articles():
@@ -201,6 +202,8 @@ def build_display(articles, state, total, fetched_at, claude_active, term_width)
             score = article.get('score', 0)
             categories = article.get('categories', [])
 
+            url = article.get('url', '')
+
             # Title line: icon + bold title
             title_text = Text()
             title_text.append(f" {icon}  ", style="")
@@ -208,7 +211,6 @@ def build_display(articles, state, total, fetched_at, claude_active, term_width)
             renderables.append(title_text)
 
             # Summary lines with vertical bar prefix
-            # Filter out URL-only "summaries"
             clean_summary = summary
             if clean_summary and (clean_summary.startswith('http') or clean_summary.startswith('Article URL:')):
                 clean_summary = ''
@@ -219,6 +221,13 @@ def build_display(articles, state, total, fetched_at, claude_active, term_width)
                     line_text.append(" ┃  ", style="dim cyan")
                     line_text.append(line, style="dim")
                     renderables.append(line_text)
+
+            # URL line (clickable in most terminals)
+            if url:
+                url_text = Text()
+                url_text.append(" ┃  ", style="dim cyan")
+                url_text.append(f"🔗 {url}", style="dim underline blue")
+                renderables.append(url_text)
 
             # Metadata line
             meta_text = Text()
@@ -231,9 +240,7 @@ def build_display(articles, state, total, fetched_at, claude_active, term_width)
             if categories:
                 meta_str_parts.append(', '.join(categories[:2]))
             meta_text.append('── ' + ' · '.join(meta_str_parts) + ' ', style="dim")
-            # Fill remaining width with dashes
-            meta_content_len = 4 + 3 + sum(len(p) + 3 for p in meta_str_parts)
-            fill = max(0, term_width - meta_content_len - 4)
+            fill = max(0, term_width - 4 - 3 - sum(len(p) + 3 for p in meta_str_parts) - 4)
             if fill > 0:
                 meta_text.append('─' * min(fill, 20), style="dim")
             renderables.append(meta_text)
@@ -260,6 +267,8 @@ def build_display(articles, state, total, fetched_at, claude_active, term_width)
     footer_text.append(":prev  ", style="dim")
     footer_text.append("r", style="bold cyan")
     footer_text.append(":refresh  ", style="dim")
+    footer_text.append("s", style="bold cyan")
+    footer_text.append(":settings  ", style="dim")
     footer_text.append("q", style="bold cyan")
     footer_text.append(":quit", style="dim")
 
@@ -293,6 +302,8 @@ def kb_listener(state):
                         state.page_offset -= PAGE_SIZE
                     elif ch == 'r':
                         state.force_refresh = True
+                    elif ch == 's':
+                        state.setup_requested = True
     except Exception:
         pass
     finally:
@@ -431,8 +442,8 @@ def run_onboarding():
 
 
 def main():
-    # Run onboarding if no preferences exist
-    if not os.path.exists(PREFS_PATH):
+    # Run onboarding if no preferences exist or --setup flag
+    if not os.path.exists(PREFS_PATH) or '--setup' in sys.argv:
         run_onboarding()
 
     state = State()
@@ -458,6 +469,14 @@ def main():
     try:
         while not state.quit:
             now = time.time()
+            # Settings requested — exit TUI, run onboarding, restart
+            if state.setup_requested:
+                state.setup_requested = False
+                sys.stdout.write("\033[H\033[2J")
+                sys.stdout.flush()
+                run_onboarding()
+                continue
+
             claude_active = is_claude_active()
 
             # Auto-push when Claude is working (every 20s)
