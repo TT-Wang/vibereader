@@ -1,5 +1,8 @@
 import sys, json, os, datetime, threading, asyncio
 from http.server import HTTPServer, BaseHTTPRequestHandler
+
+# Ensure we can import fetch.py from the same directory as this script
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from fetch import run_fetch
 
 ARTICLES_FILE = os.path.expanduser("~/.vibereader/articles.json")
@@ -123,6 +126,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(404, {"error": "not found"})
 
 if __name__ == "__main__":
+    # Initial fetch on startup
+    threading.Thread(target=lambda: asyncio.run(run_fetch()), daemon=True).start()
     server = HTTPServer(("127.0.0.1", 8888), Handler)
-    print("Vibereader dashboard running on http://0.0.0.0:8888")
+    print("Vibereader dashboard running on http://localhost:8888")
     server.serve_forever()
