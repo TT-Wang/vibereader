@@ -89,9 +89,10 @@ class Article:
 
 
 async def fetch_hn(limit=20):
-    """Fetch top stories from Hacker News API using aiohttp."""
+    """Fetch top stories from Hacker News API. Falls back to HNRSS if aiohttp missing."""
     if not _AIOHTTP:
-        return []
+        # Fallback: use HNRSS feed via feedparser (no aiohttp needed)
+        return await fetch_rss('https://hnrss.org/newest?points=50', limit=limit)
     articles = []
     try:
         async with aiohttp.ClientSession() as session:
@@ -235,12 +236,13 @@ def score_article(article_dict, prefs):
 
 async def run_fetch() -> None:
     """Fetch articles from all configured sources and save to ~/.vibereader/articles.json."""
+    if not _FEEDPARSER and not _AIOHTTP:
+        print("[vibe] No fetch libraries. Run: pip3 install feedparser aiohttp", file=sys.stderr)
+        return
     if not _AIOHTTP:
-        print("[vibe] aiohttp not installed. Run: pip3 install aiohttp", file=sys.stderr)
-        return
+        print("[vibe] aiohttp not installed — HN API disabled, using RSS feeds only", file=sys.stderr)
     if not _FEEDPARSER:
-        print("[vibe] feedparser not installed. Run: pip3 install feedparser", file=sys.stderr)
-        return
+        print("[vibe] feedparser not installed — RSS feeds disabled, using HN API only", file=sys.stderr)
 
     prefs = load_preferences()
 
