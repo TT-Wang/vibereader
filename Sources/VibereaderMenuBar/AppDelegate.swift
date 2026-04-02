@@ -9,9 +9,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var appState = AppState()
     var refreshTimer: Timer?
     var statusTimer: Timer?
+    var backendProcess: Process?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         logger.info("launching...")
+        startBackend()
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
@@ -62,5 +64,40 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func updateIcon() {
         guard let button = statusItem.button else { return }
         button.contentTintColor = appState.claudeActive ? .systemGreen : nil
+    }
+
+    // MARK: - Backend lifecycle
+
+    func startBackend() {
+        // Find vibereader_web.py next to the built binary or in the repo
+        let candidates = [
+            Bundle.main.bundlePath + "/../vibereader_web.py",
+            Bundle.main.bundlePath + "/../../vibereader_web.py",
+            NSHomeDirectory() + "/vibereader-menubar/vibereader_web.py",
+        ]
+        guard let script = candidates.first(where: { FileManager.default.fileExists(atPath: $0) }) else {
+            logger.warning("vibereader_web.py not found — backend not started. Run it manually: python3 vibereader_web.py")
+            return
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["python3", script]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            backendProcess = process
+            logger.info("Backend started (pid \(process.processIdentifier))")
+        } catch {
+            logger.error("Failed to start backend: \(error.localizedDescription)")
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        if let proc = backendProcess, proc.isRunning {
+            proc.terminate()
+            logger.info("Backend stopped")
+        }
     }
 }
