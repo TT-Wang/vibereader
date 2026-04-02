@@ -64,10 +64,10 @@ The menubar app has its **own fetch logic** (`fetch.py`) and does NOT depend on 
 - macOS 13 (Ventura) or later
 - Swift 5.9+ (Xcode 15+)
 - Python 3.11+
-- Python packages: `vibereader`, `feedparser`, `aiohttp`
+- Python packages: `feedparser`, `aiohttp` (auto-installed by the install script)
 
 ```bash
-pip install vibereader feedparser aiohttp
+pip3 install feedparser aiohttp
 ```
 
 ## Configuration

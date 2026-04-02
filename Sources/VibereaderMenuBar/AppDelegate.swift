@@ -72,6 +72,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func startBackend() {
         // Find vibereader_web.py next to the built binary or in the repo
         let candidates = [
+            NSHomeDirectory() + "/.vibereader-app/vibereader_web.py",
             Bundle.main.bundlePath + "/../vibereader_web.py",
             Bundle.main.bundlePath + "/../../vibereader_web.py",
             NSHomeDirectory() + "/vibereader-menubar/vibereader_web.py",

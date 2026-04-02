@@ -123,6 +123,6 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(404, {"error": "not found"})
 
 if __name__ == "__main__":
-    server = HTTPServer(("0.0.0.0", 8888), Handler)
+    server = HTTPServer(("127.0.0.1", 8888), Handler)
     print("Vibereader dashboard running on http://0.0.0.0:8888")
     server.serve_forever()
